@@ -1,0 +1,42 @@
+# Dependencies
+node_modules/
+
+# Build output
+dist/
+build/
+
+# Prisma generated client
+backend/node_modules/
+**/node_modules/
+
+# Prisma migrations (generated SQL — don't reformat)
+backend/prisma/migrations/
+
+# Logs
+*.log
+logs/
+
+# Environment files
+.env
+.env.*
+
+# Lock files (managed by package managers)
+package-lock.json
+pnpm-lock.yaml
+yarn.lock
+
+# TypeScript build info
+*.tsbuildinfo
+
+# Docker
+*.dockerignore
+
+# Coverage
+coverage/
+
+# VS Code
+.vscode/
+
+# OS files
+.DS_Store
+Thumbs.db
