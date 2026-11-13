@@ -11,6 +11,7 @@ import errorHandler from './middlewares/default/errorHandler.js';
 import notFound from './middlewares/default/notFound.js';
 import requestLogger from './middlewares/default/requestLogger.js';
 import { responseFormatter } from './middlewares/default/responseFormatter.js';
+import authRoutes from './modules/auth/auth.routes.js';
 
 const app = express();
 
@@ -56,6 +57,8 @@ app.get('/', (req: Request, res: Response) => {
         timestamp: new Date().toISOString(),
     });
 });
+
+app.use('/api/v1/auth', authRoutes);
 
 app.use(notFound);
 app.use(errorHandler);

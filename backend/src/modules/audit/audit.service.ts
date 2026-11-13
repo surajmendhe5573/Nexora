@@ -1,66 +1,41 @@
 import prisma from '../../config/db.js';
-import type { Prisma, Role } from '../../generated/prisma/client.js';
+import type { Prisma } from '../../generated/prisma/client.js';
 
+// Add new actions here as you build more modules (member.role_changed, invoice.deleted, ...).
 export type AuditAction =
-    | 'REPORT_UPLOADED'
-    | 'REPORT_DOWNLOADED'
-    | 'REPORT_DELETED'
-    | 'PASSWORD_SET'
-    | 'DOCTOR_REGISTERED'
-    | 'DOCTOR_APPROVED'
-    | 'DOCTOR_REJECTED'
-    | 'PROVIDER_DOCUMENT_VIEWED'
-    | 'DOCTOR_INVITE_RESENT'
-    | 'EMAIL_VERIFIED'
-    | 'DOCTOR_PROFILE_UPDATED'
-    | 'CASE_SHARED'
-    | 'CASE_SHARE_REVOKED'
-    | 'CASE_VIEWED'
-    | 'CASE_REPORTS_VIEWED'
-    | 'DOCTOR_AVAILABILITY_UPDATED'
-    | 'APPOINTMENT_REQUESTED'
-    | 'APPOINTMENT_CONFIRMED'
-    | 'APPOINTMENT_DECLINED'
-    | 'APPOINTMENT_CANCELLED'
-    | 'APPOINTMENT_COMPLETED'
-    | 'APPOINTMENT_VIEWED'
-    | 'CASE_CREATED'
-    | 'CASE_UPDATED'
-    | 'ENQUIRY_VIEWED'
-    // Hospital audit actions
-    | 'HOSPITAL_REGISTERED'
-    | 'HOSPITAL_APPROVED'
-    | 'HOSPITAL_REJECTED'
-    | 'HOSPITAL_SUSPENDED'
-    | 'HOSPITAL_REINSTATED'
-    | 'HOSPITAL_INVITE_RESENT'
-    | 'HOSPITAL_DOCUMENT_VIEWED'
-    | 'HOSPITAL_ACCREDITATION_VERIFIED'
-    | 'HOSPITAL_PROFILE_UPDATED';
+    | 'auth.register'
+    | 'auth.login'
+    | 'auth.login_failed'
+    | 'auth.logout'
+    | 'auth.logout_all'
+    | 'auth.token_reuse'
+    | 'auth.email_verified'
+    | 'auth.password_reset';
 
 export interface AuditEntry {
-    actorId?: string | null;
-    actorRole?: Role | null;
+    organizationId?: string | null;
+    userId?: string | null;
     action: AuditAction;
-    entityType: string;
+    entityType?: string | null;
     entityId?: string | null;
-    ip?: string;
-    userAgent?: string;
-    metadata?: Prisma.InputJsonObject;
+    before?: Prisma.InputJsonValue;
+    after?: Prisma.InputJsonValue;
+    ip?: string | undefined;
 }
 
 class AuditService {
+    // Pass a transaction client as `db` to make the log part of the same transaction as the change.
     async log(entry: AuditEntry, db: Prisma.TransactionClient = prisma): Promise<void> {
         await db.auditLog.create({
             data: {
-                actorId: entry.actorId ?? null,
-                actorRole: entry.actorRole ?? null,
+                organizationId: entry.organizationId ?? null,
+                userId: entry.userId ?? null,
                 action: entry.action,
-                entityType: entry.entityType,
+                entityType: entry.entityType ?? null,
                 entityId: entry.entityId ?? null,
-                ip: entry.ip,
-                userAgent: entry.userAgent,
-                metadata: entry.metadata,
+                ip: entry.ip ?? null,
+                ...(entry.before !== undefined && { before: entry.before }),
+                ...(entry.after !== undefined && { after: entry.after }),
             },
         });
     }

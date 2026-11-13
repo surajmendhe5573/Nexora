@@ -12,6 +12,13 @@ const schema = z.object({
     JWT_ACCESS_SECRET: z.string().min(32),
     JWT_ACCESS_EXPIRES_IN: z.string().default('15m'),
     REFRESH_TOKEN_TTL_DAYS: z.coerce.number().default(7),
+
+    APP_URL: z.string().default('http://localhost:3000'),
+    EMAIL_HOST: z.string().default('smtp.gmail.com'),
+    EMAIL_PORT: z.coerce.number().default(587),
+    EMAIL_USER: z.string().optional(),
+    EMAIL_PASS: z.string().optional(),
+    EMAIL_FROM: z.string().optional(),
 });
 
 const parsed = schema.safeParse(process.env);

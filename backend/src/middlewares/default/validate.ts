@@ -1,24 +1,20 @@
 import type { NextFunction, Request, Response } from 'express';
-import { z } from 'zod';
+import type { ZodType } from 'zod';
 
-export default function validate(schema: z.ZodSchema) {
+export default function validate(schema: ZodType) {
     return (req: Request, res: Response, next: NextFunction): void => {
-        const result = schema.safeParse({
-            body: req.body,
-            query: req.query,
-            params: req.params,
-        });
+        const result = schema.safeParse(req.body ?? {});
 
         if (!result.success) {
-            const formatted = result.error.issues.map((err: z.ZodIssue) => ({
-                field: err.path.join('.'),
-                message: err.message,
+            const errors = result.error.issues.map((issue) => ({
+                field: issue.path.join('.'),
+                message: issue.message,
             }));
-
-            return res.fail('Validation failed', 400, { errors: formatted });
+            res.fail('Validation failed', 400, { errors });
+            return;
         }
 
-        req.validated = result.data;
+        req.body = result.data;
         next();
     };
 }

@@ -13,7 +13,8 @@ export function authenticate(req: Request, res: Response, next: NextFunction): v
 
     try {
         const payload = AuthService.verifyAccessToken(header.slice(7));
-        req.user = { id: payload.sub, role: payload.role };
+        // req.user = { id: payload.sub, role: payload.role };
+        req.user = { id: payload.sub, orgId: payload.orgId, role: payload.role };
         next();
     } catch {
         res.fail('Invalid or expired token', statusCode.UNAUTHORIZED);

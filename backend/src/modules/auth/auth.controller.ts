@@ -4,11 +4,12 @@ import { config } from '../../config/env.js';
 import { statusCode } from '../../utils/statusCode.js';
 
 import type {
+    ForgotPasswordBody,
     LoginBody,
+    RefreshBody,
     RegisterBody,
-    ResendSetPasswordBody,
     ResendVerificationBody,
-    SetPasswordBody,
+    ResetPasswordBody,
     VerifyEmailBody,
 } from './auth.schema.js';
 import AuthService, { type RequestMeta } from './auth.service.js';
@@ -33,20 +34,25 @@ export default class AuthController {
         return { ip: req.ip, userAgent: req.get('user-agent') };
     }
 
-    private refreshCookieOf(req: Request): string | undefined {
-        return (req.cookies as Record<string, string | undefined> | undefined)?.[COOKIE_NAME];
+    private refreshTokenOf(req: Request): string | undefined {
+        const fromCookie = (req.cookies as Record<string, string | undefined> | undefined)?.[
+            COOKIE_NAME
+        ];
+        if (fromCookie) return fromCookie;
+        return (req.body as RefreshBody | undefined)?.refreshToken;
     }
 
     register = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
         try {
-            const body = (req.validated as { body: RegisterBody }).body;
-            const { email } = await this.authService.register(body, this.metaOf(req));
-
-            res.success(
-                'Registration successful. Please verify your email using the OTP sent to your registered email address.',
-                { email, emailVerified: false },
-                statusCode.CREATED,
+            const data = await this.authService.register(
+                req.body as RegisterBody,
+                this.metaOf(req),
             );
+            res.status(statusCode.CREATED).json({
+                success: true,
+                message: 'Organization registered. Please verify your email.',
+                data,
+            });
         } catch (err) {
             next(err);
         }
@@ -54,12 +60,20 @@ export default class AuthController {
 
     login = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
         try {
-            const body = (req.validated as { body: LoginBody }).body;
-            const { user, accessToken, refreshToken, refreshExpiresAt } =
-                await this.authService.login(body, this.metaOf(req));
-
-            res.cookie(COOKIE_NAME, refreshToken, this.cookieOptions(refreshExpiresAt));
-            res.success('Login successful', { user, accessToken }, statusCode.OK);
+            const { session, user } = await this.authService.login(
+                req.body as LoginBody,
+                this.metaOf(req),
+            );
+            res.cookie(COOKIE_NAME, session.refreshToken, this.cookieOptions(session.refreshExpiresAt));
+            // refreshToken is also returned in the body for Postman/mobile. For a browser-only app, drop it.
+            res.status(statusCode.OK).json({
+                success: true,
+                data: {
+                    accessToken: session.accessToken,
+                    refreshToken: session.refreshToken,
+                    user,
+                },
+            });
         } catch (err) {
             next(err);
         }
@@ -67,37 +81,17 @@ export default class AuthController {
 
     refresh = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
         try {
-            const { accessToken, refreshToken, refreshExpiresAt } = await this.authService.refresh(
-                this.refreshCookieOf(req),
-                this.metaOf(req),
-            );
-
-            res.cookie(COOKIE_NAME, refreshToken, this.cookieOptions(refreshExpiresAt));
-            res.success('Token refreshed', { accessToken }, statusCode.OK);
-        } catch (err) {
-            next(err);
-        }
-    };
-
-    verifyEmail = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
-        try {
-            const body = (req.validated as { body: VerifyEmailBody }).body;
-            await this.authService.verifyEmail(body, this.metaOf(req));
-            res.success('Email verified successfully. You can now log in.', null, statusCode.OK);
-        } catch (err) {
-            next(err);
-        }
-    };
-
-    resendVerification = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
-        try {
-            const body = (req.validated as { body: ResendVerificationBody }).body;
-            await this.authService.resendVerification(body.email);
-            res.success(
-                'If this email needs verification, a new code has been sent.',
-                null,
-                statusCode.OK,
-            );
+            const token = this.refreshTokenOf(req);
+            if (!token) {
+                res.fail('Refresh token missing', statusCode.UNAUTHORIZED);
+                return;
+            }
+            const session = await this.authService.refresh(token, this.metaOf(req));
+            res.cookie(COOKIE_NAME, session.refreshToken, this.cookieOptions(session.refreshExpiresAt));
+            res.status(statusCode.OK).json({
+                success: true,
+                data: { accessToken: session.accessToken, refreshToken: session.refreshToken },
+            });
         } catch (err) {
             next(err);
         }
@@ -105,9 +99,26 @@ export default class AuthController {
 
     logout = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
         try {
-            await this.authService.logout(this.refreshCookieOf(req));
+            await this.authService.logout(this.refreshTokenOf(req));
             res.clearCookie(COOKIE_NAME, { path: COOKIE_PATH });
-            res.success('Logged out', null, statusCode.OK);
+            res.status(statusCode.OK).json({ success: true, message: 'Logged out' });
+        } catch (err) {
+            next(err);
+        }
+    };
+
+    logoutAll = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+        try {
+            if (!req.user) {
+                res.fail('Authentication required', statusCode.UNAUTHORIZED);
+                return;
+            }
+            await this.authService.logoutAll(req.user.id);
+            res.clearCookie(COOKIE_NAME, { path: COOKIE_PATH });
+            res.status(statusCode.OK).json({
+                success: true,
+                message: 'Logged out from all devices',
+            });
         } catch (err) {
             next(err);
         }
@@ -115,32 +126,59 @@ export default class AuthController {
 
     me = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
         try {
-            const user = await this.authService.getMe(req.user!.id);
-            res.success('Profile fetched', { user }, statusCode.OK);
+            if (!req.user) {
+                res.fail('Authentication required', statusCode.UNAUTHORIZED);
+                return;
+            }
+            const data = await this.authService.me(req.user.id, req.user.orgId);
+            res.status(statusCode.OK).json({ success: true, data });
         } catch (err) {
             next(err);
         }
     };
 
-    setPassword = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+    verifyEmail = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
         try {
-            const body = (req.validated as { body: SetPasswordBody }).body;
-            await this.authService.setPassword(body, this.metaOf(req));
-            res.success('Password set. You can now log in.', null, statusCode.OK);
+            await this.authService.verifyEmail(req.body as VerifyEmailBody);
+            res.status(statusCode.OK).json({ success: true, message: 'Email verified' });
         } catch (err) {
             next(err);
         }
     };
 
-    resendSetPassword = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+    resendVerification = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
         try {
-            const body = (req.validated as { body: ResendSetPasswordBody }).body;
-            await this.authService.resendSetPassword(body.email);
-            res.success(
-                'If an approved account exists for this email, a new link has been sent.',
-                null,
-                statusCode.OK,
-            );
+            await this.authService.resendVerification(req.body as ResendVerificationBody);
+            // Same response whether or not the email exists.
+            res.status(statusCode.OK).json({
+                success: true,
+                message: 'If the account exists and is not verified, a new link has been sent.',
+            });
+        } catch (err) {
+            next(err);
+        }
+    };
+
+    forgotPassword = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+        try {
+            await this.authService.forgotPassword(req.body as ForgotPasswordBody);
+            res.status(statusCode.OK).json({
+                success: true,
+                message: 'If that email is registered, a password reset link has been sent.',
+            });
+        } catch (err) {
+            next(err);
+        }
+    };
+
+    resetPassword = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+        try {
+            await this.authService.resetPassword(req.body as ResetPasswordBody);
+            res.clearCookie(COOKIE_NAME, { path: COOKIE_PATH });
+            res.status(statusCode.OK).json({
+                success: true,
+                message: 'Password updated. Please log in with your new password.',
+            });
         } catch (err) {
             next(err);
         }

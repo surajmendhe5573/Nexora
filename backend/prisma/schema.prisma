@@ -1,0 +1,187 @@
+generator client {
+  provider = "prisma-client"
+  output   = "../src/generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+enum Role {
+  ADMIN
+  MANAGER
+  USER
+}
+
+enum OrgStatus {
+  ACTIVE
+  SUSPENDED
+}
+
+enum UserStatus {
+  ACTIVE
+  DISABLED
+}
+
+enum EmailTokenType {
+  VERIFY_EMAIL
+  RESET_PASSWORD
+}
+
+// ───────────── Plans ─────────────
+
+model Plan {
+  id            String         @id @default(uuid()) @db.Uuid
+  name          String         @unique // FREE, PRO, ENTERPRISE
+  maxMembers    Int
+  maxCustomers  Int
+  apiRatePerMin Int
+  createdAt     DateTime       @default(now())
+  organizations Organization[]
+
+  @@map("plans")
+}
+
+// ───────────── Tenancy ─────────────
+
+model Organization {
+  id        String    @id @default(uuid()) @db.Uuid
+  name      String
+  slug      String    @unique
+  logoUrl   String?
+  status    OrgStatus @default(ACTIVE)
+  planId    String    @db.Uuid
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  deletedAt DateTime?
+
+  plan          Plan           @relation(fields: [planId], references: [id])
+  memberships   Membership[]
+  invites       Invite[]
+  refreshTokens RefreshToken[]
+  auditLogs     AuditLog[]
+
+  @@index([planId])
+  @@map("organizations")
+}
+
+model User {
+  id              String     @id @default(uuid()) @db.Uuid
+  email           String     @unique
+  name            String
+  passwordHash    String
+  emailVerifiedAt DateTime?
+  status          UserStatus @default(ACTIVE)
+  isSuperAdmin    Boolean    @default(false) // platform-level owner, not tied to an org
+  lastLoginAt     DateTime?
+  createdAt       DateTime   @default(now())
+  updatedAt       DateTime   @updatedAt
+
+  memberships   Membership[]
+  refreshTokens RefreshToken[]
+  emailTokens   EmailToken[]
+  invitesSent   Invite[]       @relation("InvitedBy")
+  auditLogs     AuditLog[]
+
+  @@map("users")
+}
+
+// A user can belong to many orgs, with a role in each.
+model Membership {
+  id             String   @id @default(uuid()) @db.Uuid
+  userId         String   @db.Uuid
+  organizationId String   @db.Uuid
+  role           Role
+  createdAt      DateTime @default(now())
+
+  user         User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, organizationId])
+  @@index([organizationId])
+  @@map("memberships")
+}
+
+// ───────────── Auth tokens ─────────────
+
+// Only the SHA-256 hash of the token is stored, never the token itself.
+model RefreshToken {
+  id             String    @id @default(uuid()) @db.Uuid
+  userId         String    @db.Uuid
+  organizationId String    @db.Uuid
+  tokenHash      String    @unique
+  familyId       String    @db.Uuid // all rotated tokens of one login share this
+  expiresAt      DateTime
+  revokedAt      DateTime?
+  replacedById   String?   @db.Uuid // set when rotated; reuse of such a token = theft signal
+  ip             String?
+  userAgent      String?
+  createdAt      DateTime  @default(now())
+
+  user         User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([familyId])
+  @@map("refresh_tokens")
+}
+
+model EmailToken {
+  id        String         @id @default(uuid()) @db.Uuid
+  userId    String         @db.Uuid
+  type      EmailTokenType
+  tokenHash String         @unique
+  expiresAt DateTime
+  usedAt    DateTime?
+  createdAt DateTime       @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, type])
+  @@map("email_tokens")
+}
+
+// ───────────── Invitations ─────────────
+
+model Invite {
+  id             String    @id @default(uuid()) @db.Uuid
+  organizationId String    @db.Uuid
+  email          String
+  role           Role
+  tokenHash      String    @unique
+  expiresAt      DateTime
+  acceptedAt     DateTime?
+  revokedAt      DateTime?
+  invitedById    String    @db.Uuid
+  createdAt      DateTime  @default(now())
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  invitedBy    User         @relation("InvitedBy", fields: [invitedById], references: [id])
+
+  @@index([organizationId, email])
+  @@map("invites")
+}
+
+// ───────────── Audit ─────────────
+
+model AuditLog {
+  id             String   @id @default(uuid()) @db.Uuid
+  organizationId String?  @db.Uuid
+  userId         String?  @db.Uuid
+  action         String // e.g. auth.login, member.role_changed
+  entityType     String?
+  entityId       String?
+  before         Json?
+  after          Json?
+  ip             String?
+  createdAt      DateTime @default(now())
+
+  organization Organization? @relation(fields: [organizationId], references: [id], onDelete: SetNull)
+  user         User?         @relation(fields: [userId], references: [id], onDelete: SetNull)
+
+  @@index([organizationId, createdAt])
+  @@index([organizationId, action])
+  @@map("audit_logs")
+}
+
+// Customers, Invoices and InvoiceItems come in a later migration (Phase 7).

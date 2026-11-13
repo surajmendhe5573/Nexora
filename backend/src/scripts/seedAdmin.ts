@@ -7,7 +7,7 @@ import prisma from '../config/db.js';
 async function main(): Promise<void> {
     const email = process.env.SEED_ADMIN_EMAIL?.trim().toLowerCase();
     const password = process.env.SEED_ADMIN_PASSWORD;
-    const fullName = process.env.SEED_ADMIN_NAME?.trim() || 'Super Admin';
+    const name = process.env.SEED_ADMIN_NAME?.trim() || 'Super Admin';
 
     if (!email || !password) {
         throw new Error('Set SEED_ADMIN_EMAIL and SEED_ADMIN_PASSWORD in .env first');
@@ -18,22 +18,26 @@ async function main(): Promise<void> {
 
     const existing = await prisma.user.findUnique({ where: { email } });
     if (existing) {
-        console.log(`User ${email} already exists (role: ${existing.role}). Nothing to do.`);
+        console.log(
+            `User ${email} already exists (super admin: ${existing.isSuperAdmin}). Nothing to do.`,
+        );
         return;
     }
 
+    // A platform-level super admin belongs to no organization, so it has no membership.
+    // Logging in as super admin comes with the Super Admin module.
     await prisma.user.create({
         data: {
-            fullName,
+            name,
             email,
             passwordHash: await bcrypt.hash(password, 12),
-            role: 'SUPER_ADMIN',
+            isSuperAdmin: true,
             status: 'ACTIVE',
             emailVerifiedAt: new Date(),
         },
     });
 
-    console.log(`SUPER_ADMIN created: ${email}`);
+    console.log(`Super admin created: ${email}`);
 }
 
 main()
